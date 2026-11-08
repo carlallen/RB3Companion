@@ -179,7 +179,7 @@
 	var RING_ICON_DIR = '/static/icons/rings/';
 
 	// DIFFICULTY_PARTS lists the song-level difficulty fields (each 0-7,
-	// from the song's metadata file - 0 means the song has no chart for
+	// from the console's song list - 0 means the song has no chart for
 	// that part), in display order: two rows of five, each identified by
 	// its instrument icon rather than a text label. vocals is
 	// special-cased (see vocalsIconName) since its icon depends on the
@@ -192,7 +192,9 @@
 		{ key: 'difficultyVocals', icon: null, label: 'Vocals' },
 		{ key: 'difficultyProGuitar', icon: 'real_guitar', label: 'Pro Guitar' },
 		{ key: 'difficultyProBass', icon: 'real_bass', label: 'Pro Bass' },
-		{ key: 'difficultyProDrum', icon: 'real_drums', label: 'Pro Drums' },
+		// RB3 has no separate pro-drums rating, so Pro Drums shows the drums
+		// difficulty too.
+		{ key: 'difficultyDrum', icon: 'real_drums', label: 'Pro Drums' },
 		{ key: 'difficultyProKeys', icon: 'real_keys', label: 'Pro Keys' },
 		{ key: 'difficultyBand', icon: 'band', label: 'Band' }
 	];
@@ -203,7 +205,7 @@
 	var BAND_DIFFICULTY_PART = DIFFICULTY_PARTS[DIFFICULTY_PARTS.length - 1];
 
 	// vocalsIconName picks the vocals icon variant matching how many vocal
-	// parts (1-3) the song's metadata reported harmony parts for.
+	// parts (1-3) the console reported for the song.
 	function vocalsIconName(song) {
 		if (song.vocalParts === 3) return 'vocals3';
 		if (song.vocalParts === 2) return 'vocals2';
@@ -277,8 +279,8 @@
 	// buildSongExtra renders the album/year+length/genre lines shown next
 	// to the album art, below the title/artist, only while the row is
 	// expanded. Album comes from the live console fetch and is shown
-	// whenever known; year/length/genre come from the song's metadata file
-	// and are each shown only if that file supplied them.
+	// whenever known; year/length/genre come from the console's song list
+	// too and are each shown only if it reported them.
 	function buildSongExtra(song) {
 		var el = document.createElement('div');
 		el.className = 'song-extra';
@@ -297,9 +299,9 @@
 	}
 
 	// buildSongPanel renders the expanded detail panel for song:
-	// per-instrument difficulty, when the song has a metadata file -
-	// song.genre is null otherwise, since that's only ever set alongside
-	// the rest. (Album/genre/year/length appear next to the album art
+	// per-instrument difficulty, when the console reported metadata for the
+	// song - genre/year/length are all null otherwise, since older
+	// RB3Enhanced builds report none of them. (Album/genre/year/length appear next to the album art
 	// instead - see buildSongExtra.)
 	function buildSongPanel(song) {
 		var panel = document.createElement('div');

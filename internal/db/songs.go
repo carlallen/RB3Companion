@@ -4,12 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
-	"os"
-	"path/filepath"
 	"strings"
-	"time"
-
-	"gopkg.in/yaml.v3"
 )
 
 // SongRecord mirrors rb3net.Song. It's a separate type so this package
@@ -32,7 +27,6 @@ type SongRecord struct {
 	DifficultyVocals    int
 	DifficultyProGuitar int
 	DifficultyProBass   int
-	DifficultyProDrum   int
 	DifficultyProKeys   int
 
 	// Genre, VocalParts, Year and Length are nullable - nil when unknown.
@@ -40,12 +34,6 @@ type SongRecord struct {
 	VocalParts *int // 0-3
 	Year       *int
 	Length     *int // milliseconds
-
-	// MetadataDatetime is the modification time of the metadata JSON file
-	// SaveSongs found for this song (nil if none was found). It's
-	// recomputed by SaveSongs on every save, so callers don't need to set
-	// it themselves.
-	MetadataDatetime *time.Time
 }
 
 // songsTableColumns are the songs table's columns, shared by
@@ -65,13 +53,11 @@ const songsTableColumns = `
 	difficulty_vocals       INTEGER NOT NULL DEFAULT 0,
 	difficulty_pro_guitar   INTEGER NOT NULL DEFAULT 0,
 	difficulty_pro_bass     INTEGER NOT NULL DEFAULT 0,
-	difficulty_pro_drum     INTEGER NOT NULL DEFAULT 0,
 	difficulty_pro_keys     INTEGER NOT NULL DEFAULT 0,
 	genre                   TEXT,
 	vocal_parts             INTEGER,
 	year                    INTEGER,
 	length                  INTEGER,
-	metadata_datetime       DATETIME,
 	RB3EC_db_check          INTEGER NOT NULL DEFAULT 0
 `
 
@@ -82,7 +68,7 @@ var createSongsTable = "CREATE TABLE IF NOT EXISTS songs (" + songsTableColumns 
 // since SQLite can't just ALTER a column to add a NOT NULL constraint.
 var songDifficultyColumns = []string{
 	"difficulty_band", "difficulty_guitar", "difficulty_bass", "difficulty_drum", "difficulty_keys",
-	"difficulty_vocals", "difficulty_pro_guitar", "difficulty_pro_bass", "difficulty_pro_drum", "difficulty_pro_keys",
+	"difficulty_vocals", "difficulty_pro_guitar", "difficulty_pro_bass", "difficulty_pro_keys",
 }
 
 // songMigrationColumns are the songs columns added after the table's
@@ -98,19 +84,25 @@ var songMigrationColumns = []string{
 	"difficulty_vocals INTEGER NOT NULL DEFAULT 0",
 	"difficulty_pro_guitar INTEGER NOT NULL DEFAULT 0",
 	"difficulty_pro_bass INTEGER NOT NULL DEFAULT 0",
-	"difficulty_pro_drum INTEGER NOT NULL DEFAULT 0",
 	"difficulty_pro_keys INTEGER NOT NULL DEFAULT 0",
 	"genre TEXT",
 	"vocal_parts INTEGER",
 	"year INTEGER",
 	"length INTEGER",
-	"metadata_datetime DATETIME",
 	"RB3EC_db_check INTEGER NOT NULL DEFAULT 0",
 }
 
+// obsoleteSongColumns are songs columns earlier versions of this schema had
+// and the current one doesn't: metadata_datetime was only used by the
+// removed local metadata files, and difficulty_pro_drum always matched
+// difficulty_drum (RB3 has no separate pro-drums rank), so the UI uses
+// difficulty_drum for both. migrateSongsTable drops any still present.
+var obsoleteSongColumns = []string{"metadata_datetime", "difficulty_pro_drum"}
+
 // migrateSongsTable brings an already-existing songs table up to
-// songsTableColumns: it renames the old db_art_check column if present, adds
-// any songMigrationColumns that are missing entirely, then, if needed,
+// songsTableColumns: it renames the old db_art_check column if present, drops
+// any obsoleteSongColumns still present, adds any songMigrationColumns that are missing
+// entirely, then, if needed,
 // rebuilds the table to restore the NOT NULL DEFAULT 0 constraint an earlier
 // version of this schema dropped from the difficulty columns, coalescing any
 // existing NULLs there to 0 along the way.
@@ -128,6 +120,16 @@ func migrateSongsTable(sqlDB *sql.DB) error {
 			columns["RB3EC_db_check"] = columns["db_art_check"]
 		}
 		delete(columns, "db_art_check")
+	}
+
+	for _, name := range obsoleteSongColumns {
+		if _, ok := columns[name]; !ok {
+			continue
+		}
+		if _, err := sqlDB.Exec(fmt.Sprintf(`ALTER TABLE songs DROP COLUMN %s`, name)); err != nil {
+			return err
+		}
+		delete(columns, name)
 	}
 
 	for _, colDef := range songMigrationColumns {
@@ -203,9 +205,8 @@ func rebuildSongsTableDifficultyNotNull(sqlDB *sql.DB) error {
 			shortname, title, artist, album, origin,
 			COALESCE(difficulty_band, 0), COALESCE(difficulty_guitar, 0), COALESCE(difficulty_bass, 0),
 			COALESCE(difficulty_drum, 0), COALESCE(difficulty_keys, 0), COALESCE(difficulty_vocals, 0),
-			COALESCE(difficulty_pro_guitar, 0), COALESCE(difficulty_pro_bass, 0), COALESCE(difficulty_pro_drum, 0),
-			COALESCE(difficulty_pro_keys, 0),
-			genre, vocal_parts, year, length, metadata_datetime, RB3EC_db_check
+			COALESCE(difficulty_pro_guitar, 0), COALESCE(difficulty_pro_bass, 0), COALESCE(difficulty_pro_keys, 0),
+			genre, vocal_parts, year, length, RB3EC_db_check
 		FROM songs`); err != nil {
 		return err
 	}
@@ -218,140 +219,36 @@ func rebuildSongsTableDifficultyNotNull(sqlDB *sql.DB) error {
 	return tx.Commit()
 }
 
-// songMetadataFile is the YAML shape of a <shortname>.yml metadata file.
-// Title/artist/album/shortname aren't read from it - the live console fetch
-// is the source of truth for those.
-type songMetadataFile struct {
-	// All fields are pointers: several metadata files explicitly set some
-	// of these to null rather than omitting them, and the diff object
-	// omits keys for instruments the song has no chart for entirely - both
-	// must come through as "unknown"/"not charted" (nil), never silently
-	// become 0 or "".
-	Genre *string `yaml:"genre"`
-	Diff  struct {
-		Band      *int `yaml:"band"`
-		Guitar    *int `yaml:"guitar"`
-		Bass      *int `yaml:"bass"`
-		Drum      *int `yaml:"drum"`
-		Keys      *int `yaml:"keys"`
-		Vocals    *int `yaml:"vocals"`
-		ProGuitar *int `yaml:"pro_guitar"`
-		ProBass   *int `yaml:"pro_bass"`
-		ProDrum   *int `yaml:"pro_drum"`
-		ProKeys   *int `yaml:"pro_keys"`
-	} `yaml:"diff"`
-	VocalParts   *int `yaml:"vocal_parts"`
-	YearReleased *int `yaml:"year_released"`
-	SongLength   *int `yaml:"song_length"`
-}
-
-// findMetadataFile returns the path and modification time of the first
-// <shortname>.yml found across metadataDirs, checked in order.
-func findMetadataFile(shortname string, metadataDirs []string) (path string, modTime time.Time, found bool) {
-	for _, dir := range metadataDirs {
-		if dir == "" {
-			continue
-		}
-		p := filepath.Join(dir, shortname+".yml")
-		info, err := os.Stat(p)
-		if err != nil || info.IsDir() {
-			continue
-		}
-		return p, info.ModTime(), true
-	}
-	return "", time.Time{}, false
-}
-
 // applySongMetadata sets s's difficulty/genre/vocal-parts/year/length
-// fields. If s has a metadata file (found via metadataDirs) newer than the
-// metadata it last used (stored.MetadataDatetime), that file is parsed and
-// its values applied; otherwise s keeps whatever metadata was already
-// stored for it (nothing, if this is a song seen for the first time).
-func applySongMetadata(s *SongRecord, metadataDirs []string, stored SongRecord) {
-	path, modTime, found := findMetadataFile(s.Shortname, metadataDirs)
-	if !found || (stored.MetadataDatetime != nil && !modTime.After(*stored.MetadataDatetime)) {
-		copySongMetadata(s, stored)
+// fields. Metadata the console reported in the song list (see
+// hasConsoleMetadata) is used as-is, except that a missing VocalParts (only
+// reported when the console has the song's info loaded) keeps the stored
+// value. Otherwise - an older RB3Enhanced
+// build that only reports the identifying fields - s keeps whatever
+// metadata was already stored for it (nothing, for a song seen for the
+// first time).
+func applySongMetadata(s *SongRecord, stored SongRecord) {
+	if hasConsoleMetadata(*s) {
+		if s.VocalParts == nil {
+			s.VocalParts = stored.VocalParts
+		}
 		return
 	}
-
-	data, err := os.ReadFile(path)
-	if err != nil {
-		log.Printf("db: failed to read metadata file %s: %v", path, err)
-		copySongMetadata(s, stored)
-		return
-	}
-	var meta songMetadataFile
-	if err := yaml.Unmarshal(data, &meta); err != nil {
-		log.Printf("db: failed to parse metadata file %s: %v", path, err)
-		copySongMetadata(s, stored)
-		return
-	}
-	applyParsedMetadata(s, meta, modTime)
+	copySongMetadata(s, stored)
 }
 
-// applyParsedMetadata copies meta's fields onto s and stamps
-// s.MetadataDatetime with datetime. meta's diff fields come through as nil
-// when the metadata file omitted that part entirely (not charted) or
-// explicitly nulled it out - either way it becomes 0 on s, same as an
-// explicit 0 in the file, since the songs table's difficulty columns are
-// NOT NULL.
-func applyParsedMetadata(s *SongRecord, meta songMetadataFile, datetime time.Time) {
-	s.DifficultyBand = diffOrZero(meta.Diff.Band)
-	s.DifficultyGuitar = diffOrZero(meta.Diff.Guitar)
-	s.DifficultyBass = diffOrZero(meta.Diff.Bass)
-	s.DifficultyDrum = diffOrZero(meta.Diff.Drum)
-	s.DifficultyKeys = diffOrZero(meta.Diff.Keys)
-	s.DifficultyVocals = diffOrZero(meta.Diff.Vocals)
-	s.DifficultyProGuitar = diffOrZero(meta.Diff.ProGuitar)
-	s.DifficultyProBass = diffOrZero(meta.Diff.ProBass)
-	s.DifficultyProDrum = diffOrZero(meta.Diff.ProDrum)
-	s.DifficultyProKeys = diffOrZero(meta.Diff.ProKeys)
-	s.Genre = meta.Genre
-	s.VocalParts = meta.VocalParts
-	s.Year = meta.YearReleased
-	s.Length = meta.SongLength
-	t := datetime
-	s.MetadataDatetime = &t
-}
-
-// diffOrZero returns 0 for a nil difficulty pointer, or the pointed-to
-// value otherwise.
-func diffOrZero(p *int) int {
-	if p == nil {
-		return 0
-	}
-	return *p
-}
-
-// ImportMetadata parses YAML-formatted song metadata and applies it directly
-// to shortname's row in the songs table, stamping metadata_datetime with the
-// current time since there's no backing file to take a modification time
-// from. It's a no-op if shortname isn't already present in the table.
-func ImportMetadata(sqlDB *sql.DB, shortname string, data []byte) error {
-	var meta songMetadataFile
-	if err := yaml.Unmarshal(data, &meta); err != nil {
-		return err
-	}
-
-	s := SongRecord{Shortname: shortname}
-	applyParsedMetadata(&s, meta, time.Now())
-
-	_, err := sqlDB.Exec(`
-		UPDATE songs SET
-			difficulty_band = ?, difficulty_guitar = ?, difficulty_bass = ?, difficulty_drum = ?, difficulty_keys = ?,
-			difficulty_vocals = ?, difficulty_pro_guitar = ?, difficulty_pro_bass = ?, difficulty_pro_drum = ?, difficulty_pro_keys = ?,
-			genre = ?, vocal_parts = ?, year = ?, length = ?, metadata_datetime = ?
-		WHERE shortname = ?`,
-		s.DifficultyBand, s.DifficultyGuitar, s.DifficultyBass, s.DifficultyDrum, s.DifficultyKeys,
-		s.DifficultyVocals, s.DifficultyProGuitar, s.DifficultyProBass, s.DifficultyProDrum, s.DifficultyProKeys,
-		s.Genre, s.VocalParts, s.Year, s.Length, s.MetadataDatetime,
-		shortname,
-	)
-	return err
+// hasConsoleMetadata reports whether s carries metadata from the console's
+// song list - newer RB3Enhanced builds report genre/year/length/vocal parts
+// and per-part ranks there, older ones only the identifying fields.
+func hasConsoleMetadata(s SongRecord) bool {
+	return s.Genre != nil || s.Year != nil || s.Length != nil || s.VocalParts != nil ||
+		s.DifficultyBand != 0 || s.DifficultyGuitar != 0 || s.DifficultyBass != 0 ||
+		s.DifficultyDrum != 0 || s.DifficultyKeys != 0 || s.DifficultyVocals != 0 ||
+		s.DifficultyProGuitar != 0 || s.DifficultyProBass != 0 || s.DifficultyProKeys != 0
 }
 
 // copySongMetadata copies stored's difficulty/genre/vocal-parts/year/
-// length/metadata-datetime fields onto s, leaving s's identifying fields
+// length fields onto s, leaving s's identifying fields
 // (shortname, title, artist, album, origin) untouched.
 func copySongMetadata(s *SongRecord, stored SongRecord) {
 	s.DifficultyBand = stored.DifficultyBand
@@ -362,31 +259,28 @@ func copySongMetadata(s *SongRecord, stored SongRecord) {
 	s.DifficultyVocals = stored.DifficultyVocals
 	s.DifficultyProGuitar = stored.DifficultyProGuitar
 	s.DifficultyProBass = stored.DifficultyProBass
-	s.DifficultyProDrum = stored.DifficultyProDrum
 	s.DifficultyProKeys = stored.DifficultyProKeys
 	s.Genre = stored.Genre
 	s.VocalParts = stored.VocalParts
 	s.Year = stored.Year
 	s.Length = stored.Length
-	s.MetadataDatetime = stored.MetadataDatetime
 }
 
 // nullableSongMetadata holds sql.Scan destinations for every nullable songs
-// column (genre/vocal-parts/year/length/metadata-datetime - the difficulty
+// column (genre/vocal-parts/year/length - the difficulty
 // columns are NOT NULL, so they're scanned directly into SongRecord's plain
 // int fields instead), in the column order shared by loadStoredSongMetadata
 // and LoadSongs's queries.
 type nullableSongMetadata struct {
-	genre            sql.NullString
-	vocalParts       sql.NullInt64
-	year             sql.NullInt64
-	length           sql.NullInt64
-	metadataDatetime sql.NullTime
+	genre      sql.NullString
+	vocalParts sql.NullInt64
+	year       sql.NullInt64
+	length     sql.NullInt64
 }
 
 // dests returns Scan destinations for n's fields, in column order.
 func (n *nullableSongMetadata) dests() []interface{} {
-	return []interface{}{&n.genre, &n.vocalParts, &n.year, &n.length, &n.metadataDatetime}
+	return []interface{}{&n.genre, &n.vocalParts, &n.year, &n.length}
 }
 
 // applyTo sets s's corresponding fields to nil, or a pointer to the scanned
@@ -399,10 +293,6 @@ func (n nullableSongMetadata) applyTo(s *SongRecord) {
 	s.VocalParts = nullIntPtr(n.vocalParts)
 	s.Year = nullIntPtr(n.year)
 	s.Length = nullIntPtr(n.length)
-	if n.metadataDatetime.Valid {
-		t := n.metadataDatetime.Time
-		s.MetadataDatetime = &t
-	}
 }
 
 func nullIntPtr(n sql.NullInt64) *int {
@@ -414,16 +304,15 @@ func nullIntPtr(n sql.NullInt64) *int {
 }
 
 // loadStoredSongMetadata returns the difficulty/genre/vocal-parts/year/
-// length/metadata-datetime fields currently stored for every song, keyed by
-// shortname, so SaveSongs can tell whether a song's metadata file has
-// changed since it was last applied.
+// length fields currently stored for every song, keyed by shortname, so
+// SaveSongs can keep them for songs the console reports no metadata for.
 func loadStoredSongMetadata(tx *sql.Tx) (map[string]SongRecord, error) {
 	rows, err := tx.Query(`
 		SELECT
 			shortname,
 			difficulty_band, difficulty_guitar, difficulty_bass, difficulty_drum, difficulty_keys,
-			difficulty_vocals, difficulty_pro_guitar, difficulty_pro_bass, difficulty_pro_drum, difficulty_pro_keys,
-			genre, vocal_parts, year, length, metadata_datetime
+			difficulty_vocals, difficulty_pro_guitar, difficulty_pro_bass, difficulty_pro_keys,
+			genre, vocal_parts, year, length
 		FROM songs`)
 	if err != nil {
 		return nil, err
@@ -437,7 +326,7 @@ func loadStoredSongMetadata(tx *sql.Tx) (map[string]SongRecord, error) {
 		dest := append([]interface{}{
 			&s.Shortname,
 			&s.DifficultyBand, &s.DifficultyGuitar, &s.DifficultyBass, &s.DifficultyDrum, &s.DifficultyKeys,
-			&s.DifficultyVocals, &s.DifficultyProGuitar, &s.DifficultyProBass, &s.DifficultyProDrum, &s.DifficultyProKeys,
+			&s.DifficultyVocals, &s.DifficultyProGuitar, &s.DifficultyProBass, &s.DifficultyProKeys,
 		}, n.dests()...)
 		if err := rows.Scan(dest...); err != nil {
 			return nil, err
@@ -458,13 +347,11 @@ func loadStoredSongMetadata(tx *sql.Tx) (map[string]SongRecord, error) {
 // list is only allowed to clear the table if the table was already empty;
 // otherwise the existing rows are left untouched and a warning is logged.
 //
-// For each song, metadataDirs is checked in order for a <shortname>.yml
-// metadata file. If the file found is newer than the metadata the song last
-// used, it's (re)parsed and applied; otherwise the song's previously stored
-// metadata is kept as-is. This is done here, rather than by the caller, so
+// Songs the console reported no metadata for keep their stored metadata -
+// see applySongMetadata. This is done here, rather than by the caller, so
 // every insert path gets it consistently. songs is mutated in place with
 // the resulting values.
-func SaveSongs(sqlDB *sql.DB, songs []SongRecord, metadataDirs ...string) error {
+func SaveSongs(sqlDB *sql.DB, songs []SongRecord) error {
 	tx, err := sqlDB.Begin()
 	if err != nil {
 		return err
@@ -476,17 +363,17 @@ func SaveSongs(sqlDB *sql.DB, songs []SongRecord, metadataDirs ...string) error 
 		return err
 	}
 	for i := range songs {
-		applySongMetadata(&songs[i], metadataDirs, stored[songs[i].Shortname])
+		applySongMetadata(&songs[i], stored[songs[i].Shortname])
 	}
 
 	stmt, err := tx.Prepare(`
 		INSERT INTO songs (
 			shortname, title, artist, album, origin,
 			difficulty_band, difficulty_guitar, difficulty_bass, difficulty_drum, difficulty_keys,
-			difficulty_vocals, difficulty_pro_guitar, difficulty_pro_bass, difficulty_pro_drum, difficulty_pro_keys,
-			genre, vocal_parts, year, length, metadata_datetime
+			difficulty_vocals, difficulty_pro_guitar, difficulty_pro_bass, difficulty_pro_keys,
+			genre, vocal_parts, year, length
 		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(shortname) DO UPDATE SET
 			title = excluded.title,
 			artist = excluded.artist,
@@ -500,13 +387,11 @@ func SaveSongs(sqlDB *sql.DB, songs []SongRecord, metadataDirs ...string) error 
 			difficulty_vocals = excluded.difficulty_vocals,
 			difficulty_pro_guitar = excluded.difficulty_pro_guitar,
 			difficulty_pro_bass = excluded.difficulty_pro_bass,
-			difficulty_pro_drum = excluded.difficulty_pro_drum,
 			difficulty_pro_keys = excluded.difficulty_pro_keys,
 			genre = excluded.genre,
 			vocal_parts = excluded.vocal_parts,
 			year = excluded.year,
-			length = excluded.length,
-			metadata_datetime = excluded.metadata_datetime`)
+			length = excluded.length`)
 	if err != nil {
 		return err
 	}
@@ -519,8 +404,8 @@ func SaveSongs(sqlDB *sql.DB, songs []SongRecord, metadataDirs ...string) error 
 		if _, err := stmt.Exec(
 			s.Shortname, s.Title, s.Artist, s.Album, s.Origin,
 			s.DifficultyBand, s.DifficultyGuitar, s.DifficultyBass, s.DifficultyDrum, s.DifficultyKeys,
-			s.DifficultyVocals, s.DifficultyProGuitar, s.DifficultyProBass, s.DifficultyProDrum, s.DifficultyProKeys,
-			s.Genre, s.VocalParts, s.Year, s.Length, s.MetadataDatetime,
+			s.DifficultyVocals, s.DifficultyProGuitar, s.DifficultyProBass, s.DifficultyProKeys,
+			s.Genre, s.VocalParts, s.Year, s.Length,
 		); err != nil {
 			return err
 		}
@@ -598,8 +483,8 @@ func LoadSongs(sqlDB *sql.DB) ([]SongRecord, error) {
 		SELECT
 			shortname, title, artist, album, origin,
 			difficulty_band, difficulty_guitar, difficulty_bass, difficulty_drum, difficulty_keys,
-			difficulty_vocals, difficulty_pro_guitar, difficulty_pro_bass, difficulty_pro_drum, difficulty_pro_keys,
-			genre, vocal_parts, year, length, metadata_datetime
+			difficulty_vocals, difficulty_pro_guitar, difficulty_pro_bass, difficulty_pro_keys,
+			genre, vocal_parts, year, length
 		FROM songs ORDER BY title COLLATE NOCASE`)
 	if err != nil {
 		return nil, err
@@ -613,7 +498,7 @@ func LoadSongs(sqlDB *sql.DB) ([]SongRecord, error) {
 		dest := append([]interface{}{
 			&s.Shortname, &s.Title, &s.Artist, &s.Album, &s.Origin,
 			&s.DifficultyBand, &s.DifficultyGuitar, &s.DifficultyBass, &s.DifficultyDrum, &s.DifficultyKeys,
-			&s.DifficultyVocals, &s.DifficultyProGuitar, &s.DifficultyProBass, &s.DifficultyProDrum, &s.DifficultyProKeys,
+			&s.DifficultyVocals, &s.DifficultyProGuitar, &s.DifficultyProBass, &s.DifficultyProKeys,
 		}, n.dests()...)
 		if err := rows.Scan(dest...); err != nil {
 			return nil, err

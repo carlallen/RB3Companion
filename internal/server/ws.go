@@ -77,15 +77,12 @@ type songDTO struct {
 	DifficultyVocals    int `json:"difficultyVocals"`
 	DifficultyProGuitar int `json:"difficultyProGuitar"`
 	DifficultyProBass   int `json:"difficultyProBass"`
-	DifficultyProDrum   int `json:"difficultyProDrum"`
 	DifficultyProKeys   int `json:"difficultyProKeys"`
 
 	Genre      *string `json:"genre,omitempty"`
 	VocalParts *int    `json:"vocalParts,omitempty"`
 	Year       *int    `json:"year,omitempty"`
 	Length     *int    `json:"lengthMs,omitempty"`
-
-	MetadataDatetime *time.Time `json:"metadataDatetime,omitempty"`
 
 	// HasArt tells the dashboard whether to request this song's custom art
 	// (at /static/art/<shortname>_keep.png) or just use its own default
@@ -122,7 +119,6 @@ func newSongDTO(song rb3net.Song, hasArt bool) songDTO {
 		DifficultyVocals:    song.DifficultyVocals,
 		DifficultyProGuitar: song.DifficultyProGuitar,
 		DifficultyProBass:   song.DifficultyProBass,
-		DifficultyProDrum:   song.DifficultyProDrum,
 		DifficultyProKeys:   song.DifficultyProKeys,
 
 		Genre:      song.Genre,
@@ -130,8 +126,7 @@ func newSongDTO(song rb3net.Song, hasArt bool) songDTO {
 		Year:       song.Year,
 		Length:     song.Length,
 
-		MetadataDatetime: song.MetadataDatetime,
-		HasArt:           hasArt,
+		HasArt: hasArt,
 	}
 }
 
@@ -254,7 +249,7 @@ func writeState(ctx context.Context, conn *websocket.Conn, d dashboardState) err
 
 // handleJump proxies to the console's /jump endpoint, which switches the
 // Music Library's selection to the given song.
-func handleJump(hub *rb3net.Hub) http.HandlerFunc {
+func handleJump(hub *rb3net.Hub, sqlDB *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		shortname := r.URL.Query().Get("shortname")
 		if shortname == "" {
@@ -262,9 +257,9 @@ func handleJump(hub *rb3net.Hub) http.HandlerFunc {
 			return
 		}
 
-		ip := hub.State().SourceIP
+		ip := rb3net.ConsoleAddress(sqlDB, hub.State())
 		if ip == "" {
-			http.Error(w, "console address unknown - waiting for RB3Enhanced", http.StatusServiceUnavailable)
+			http.Error(w, "console address unknown - set it on the settings page or wait for RB3Enhanced", http.StatusServiceUnavailable)
 			return
 		}
 

@@ -71,14 +71,13 @@ func main() {
 		}
 	}()
 
-	metadataDirs := []string{filepath.Join(storeDir, "metadata")}
-	songs := &rb3net.SongListWatcher{Hub: hub, DB: database, MetadataDirs: metadataDirs}
+	songs := &rb3net.SongListWatcher{Hub: hub, DB: database}
 	go songs.Run(ctx)
 
 	wled := &rb3net.WLEDWatcher{Hub: hub, DB: database}
 	go wled.Run(ctx)
 
-	dbCheck := &rb3net.RB3ECDBCheckWatcher{Hub: hub, DB: database, StoreDir: storeDir, MetadataDirs: metadataDirs}
+	dbCheck := &rb3net.RB3ECDBCheckWatcher{Hub: hub, DB: database, StoreDir: storeDir}
 	go dbCheck.Run(ctx)
 
 	srv := &http.Server{

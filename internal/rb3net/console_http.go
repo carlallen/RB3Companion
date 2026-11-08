@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -51,7 +52,10 @@ func FetchSongList(ctx context.Context, ip string) ([]Song, error) {
 }
 
 // parseSongListINI parses RB3Enhanced's /list_songs response: repeated
-// "[shortname]\r\nkey=value\r\n...\r\n\r\n" blocks, one per song.
+// "[shortname]\r\nkey=value\r\n...\r\n\r\n" blocks, one per song. Besides
+// the identifying fields, newer RB3Enhanced builds also report genre, year,
+// length, vocal_parts and a rank_<part> line per charted part; ranks are converted to
+// 0-7 difficulty tiers here. Older builds omit these, leaving them unset.
 func parseSongListINI(r io.Reader) []Song {
 	var songs []Song
 	var cur *Song
@@ -85,9 +89,140 @@ func parseSongListINI(r io.Reader) []Song {
 			cur.Album = value
 		case "origin":
 			cur.Origin = value
+		case "genre":
+			if value != "" {
+				g := genreDisplayName(value)
+				cur.Genre = &g
+			}
+		case "year":
+			// RB3Enhanced reports dateReleased.year + 1900, so a song with
+			// no release date comes through as 1900.
+			if n, err := strconv.Atoi(value); err == nil && n > 1900 {
+				cur.Year = &n
+			}
+		case "length":
+			if n, err := strconv.Atoi(value); err == nil && n > 0 {
+				cur.Length = &n
+			}
+		case "vocal_parts":
+			// Only reported when the console has the song's info loaded.
+			if n, err := strconv.Atoi(value); err == nil && n >= 0 && n <= 3 {
+				cur.VocalParts = &n
+			}
+		default:
+			if !strings.HasPrefix(key, "rank_") {
+				continue
+			}
+			part := strings.TrimPrefix(key, "rank_")
+			rank, err := strconv.Atoi(value)
+			if err != nil {
+				continue
+			}
+			applyRank(cur, part, rank)
 		}
 	}
 	return songs
+}
+
+// rankTierThresholds are, per RB3 rank part, the minimum raw rank for tiers
+// 2-7 (any rank above 0 but below the first is tier 1) - the official
+// instrument difficulty tier values, as used by rb_dta_to_rb3ec_db_yml and
+// Nautilus to build RB3EC-db's metadata files.
+var rankTierThresholds = map[string][6]int{
+	"band":        {165, 215, 243, 267, 292, 345},
+	"guitar":      {139, 176, 221, 267, 333, 409},
+	"bass":        {135, 181, 228, 293, 364, 436},
+	"drum":        {124, 151, 178, 242, 345, 448},
+	"keys":        {153, 211, 269, 327, 385, 443},
+	"vocals":      {132, 175, 218, 279, 353, 427},
+	"real_guitar": {150, 208, 267, 325, 384, 442},
+	"real_bass":   {150, 208, 267, 325, 384, 442},
+	"real_keys":   {153, 211, 269, 327, 385, 443},
+}
+
+// rankTier converts a raw rank for part into a 0-7 difficulty tier, 0
+// meaning the song has no chart for that part.
+func rankTier(part string, rank int) int {
+	thresholds, ok := rankTierThresholds[part]
+	if !ok || rank <= 0 {
+		return 0
+	}
+	tier := 1
+	for _, t := range thresholds {
+		if rank >= t {
+			tier++
+		}
+	}
+	return tier
+}
+
+// applyRank sets the difficulty field on s matching an RB3 rank part. RB3
+// has no separate pro-drums rank, so drum covers both.
+func applyRank(s *Song, part string, rank int) {
+	tier := rankTier(part, rank)
+	switch part {
+	case "band":
+		s.DifficultyBand = tier
+	case "guitar":
+		s.DifficultyGuitar = tier
+	case "bass":
+		s.DifficultyBass = tier
+	case "drum":
+		s.DifficultyDrum = tier
+	case "keys":
+		s.DifficultyKeys = tier
+	case "vocals":
+		s.DifficultyVocals = tier
+	case "real_guitar":
+		s.DifficultyProGuitar = tier
+	case "real_bass":
+		s.DifficultyProBass = tier
+	case "real_keys":
+		s.DifficultyProKeys = tier
+	}
+}
+
+// genreDisplayNames maps RB3 genre symbols to their display names, matching
+// the genre strings in RB3EC-db's metadata files. Unknown symbols are shown
+// as-is.
+var genreDisplayNames = map[string]string{
+	"alternative":        "Alternative",
+	"blues":              "Blues",
+	"classical":          "Classical",
+	"classicrock":        "Classic Rock",
+	"country":            "Country",
+	"emo":                "Emo",
+	"fusion":             "Fusion",
+	"glam":               "Glam",
+	"grunge":             "Grunge",
+	"hiphoprap":          "Hip-Hop/Rap",
+	"indierock":          "Indie Rock",
+	"jazz":               "Jazz",
+	"jrock":              "J-Rock",
+	"latin":              "Latin",
+	"metal":              "Metal",
+	"new_wave":           "New Wave",
+	"novelty":            "Novelty",
+	"numetal":            "Nu-Metal",
+	"other":              "Other",
+	"poprock":            "Pop-Rock",
+	"popdanceelectronic": "Pop/Dance/Electronic",
+	"prog":               "Prog",
+	"punk":               "Punk",
+	"rbsoulfunk":         "R&B/Soul/Funk",
+	"reggaeska":          "Reggae/Ska",
+	"inspirational":      "Inspirational",
+	"rock":               "Rock",
+	"southernrock":       "Southern Rock",
+	"urban":              "Urban",
+	"world":              "World",
+}
+
+func genreDisplayName(symbol string) string {
+	if name, ok := genreDisplayNames[symbol]; ok {
+		return name
+	}
+	return symbol
 }
 
 // Jump tells the console to select shortname in the Music Library.
@@ -111,6 +246,21 @@ func Jump(ctx context.Context, ip, shortname string) error {
 	return nil
 }
 
+// ConsoleAddress returns the address to reach the console's HTTP server at:
+// the one configured on the settings page if set, otherwise the address
+// RB3Enhanced's UDP packets were last received from. "" means neither is
+// known yet.
+func ConsoleAddress(sqlDB *sql.DB, state GameState) string {
+	ip, err := db.GetConsoleIP(sqlDB)
+	if err != nil {
+		log.Printf("rb3net: failed to read configured console ip: %v", err)
+	}
+	if ip != "" {
+		return ip
+	}
+	return state.SourceIP
+}
+
 // SongListWatcher fetches the song list from the console's HTTP server the
 // first time RB3Enhanced reports the song select screen after each
 // successful connection and persists it to DB, bumping the Hub's
@@ -119,9 +269,6 @@ func Jump(ctx context.Context, ip, shortname string) error {
 type SongListWatcher struct {
 	Hub *Hub
 	DB  *sql.DB
-	// MetadataDirs is checked, in order, for a <shortname>.yml metadata
-	// file for each song on every save - see db.SaveSongs.
-	MetadataDirs []string
 }
 
 func (w *SongListWatcher) Run(ctx context.Context) {
@@ -145,11 +292,15 @@ func (w *SongListWatcher) Run(ctx context.Context) {
 			}
 			wasConnected = state.Connected
 
-			if fetchedThisConnection || state.ScreenName != songListScreen || state.SourceIP == "" {
+			if fetchedThisConnection || state.ScreenName != songListScreen {
+				continue
+			}
+			ip := ConsoleAddress(w.DB, state)
+			if ip == "" {
 				continue
 			}
 			fetchedThisConnection = true
-			go w.fetch(ctx, state.SourceIP)
+			go w.fetch(ctx, ip)
 		}
 	}
 }
@@ -168,7 +319,7 @@ func (w *SongListWatcher) fetch(ctx context.Context, ip string) {
 	for i, s := range songs {
 		records[i] = db.SongRecord(s)
 	}
-	if err := db.SaveSongs(w.DB, records, w.MetadataDirs...); err != nil {
+	if err := db.SaveSongs(w.DB, records); err != nil {
 		log.Printf("rb3net: song list save failed: %v (console_ip=%s)", err, ip)
 	}
 

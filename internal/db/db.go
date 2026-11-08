@@ -35,5 +35,9 @@ func Open(path string) (*sql.DB, error) {
 		db.Close()
 		return nil, err
 	}
+	if _, err := db.Exec(createSettingsTable); err != nil {
+		db.Close()
+		return nil, err
+	}
 	return db, nil
 }

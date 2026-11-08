@@ -20,31 +20,19 @@ import (
 // bundled album art, keyed by origin and shortname.
 const artURLTemplate = "https://github.com/carlallen/RB3EC-db/blob/main/art/%s/%s_keep.png?raw=true"
 
-// metadataURLTemplate is the RB3EC-db repository's raw-content URL for a
-// song's bundled metadata, keyed by origin and shortname.
-const metadataURLTemplate = "https://raw.githubusercontent.com/carlallen/RB3EC-db/refs/heads/main/metadata/%s/%s.yml"
-
 // RB3ECDBCheckWatcher checks every song not yet checked
 // (db.PendingRB3ECDBCheckSongs) against the RB3EC-db repository each time the
 // song list is (re)loaded - both the initial load from the database at
 // startup and every subsequent console fetch bump SongList and so wake this
 // watcher, since it just watches for SongList changes on the Hub rather than
-// being wired into either load path directly. For each such song: if it has
+// being wired into either load path directly. For each such song, if it has
 // no art locally yet, art is fetched from RB3EC-db and, if present,
-// downloaded into storeDir/art; independently, if it has no local metadata
-// file (checked via MetadataDirs), metadata is fetched from RB3EC-db and, if
-// present, imported directly into the song's row (see db.ImportMetadata).
-// The song is then marked checked so it isn't retried.
+// downloaded into storeDir/art. The song is then marked checked so it isn't
+// retried.
 type RB3ECDBCheckWatcher struct {
 	Hub      *Hub
 	DB       *sql.DB
 	StoreDir string
-
-	// MetadataDirs is checked, in order, for a local <shortname>.yml
-	// metadata file - the same list passed to db.SaveSongs. A song with no
-	// local file has its metadata fetched from RB3EC-db and imported
-	// directly into the database.
-	MetadataDirs []string
 
 	// mu guards running and rerun, which together coalesce version bumps
 	// that arrive while a check() pass is still in flight (see trigger) so
@@ -132,7 +120,7 @@ func (w *RB3ECDBCheckWatcher) check(ctx context.Context) {
 		return
 	}
 
-	// changed tracks whether this pass wrote any art or metadata, so
+	// changed tracks whether this pass downloaded any art, so
 	// SongListVersion only needs bumping - waking subscribers, e.g. the web
 	// dashboard, to reload the song list from the database - when something
 	// actually changed.
@@ -146,33 +134,18 @@ func (w *RB3ECDBCheckWatcher) check(ctx context.Context) {
 			return
 		}
 
-		// A transient failure fetching either (network, disk, unexpected
+		// A transient failure fetching art (network, disk, unexpected
 		// status) leaves RB3EC_db_check false so this song is retried on the
 		// next check rather than being skipped forever.
-		ok := true
-
 		if !hasLocalArt(artDir, s.Shortname) {
 			downloaded, err := downloadArt(ctx, artDir, s.Shortname, s.Origin)
 			if err != nil {
 				log.Printf("rb3net: art check: %s: %v", s.Shortname, err)
-				ok = false
-			} else if downloaded {
+				continue
+			}
+			if downloaded {
 				changed = true
 			}
-		}
-
-		if !hasLocalMetadata(s.Shortname, w.MetadataDirs) {
-			imported, err := importRemoteMetadata(ctx, w.DB, s.Shortname, s.Origin)
-			if err != nil {
-				log.Printf("rb3net: metadata check: %s: %v", s.Shortname, err)
-				ok = false
-			} else if imported {
-				changed = true
-			}
-		}
-
-		if !ok {
-			continue
 		}
 
 		if err := db.MarkRB3ECDBChecked(w.DB, s.Shortname); err != nil {
@@ -187,8 +160,7 @@ func (w *RB3ECDBCheckWatcher) check(ctx context.Context) {
 
 // refreshHub bumps SongListVersion so clients connected to a server that's
 // been running (rather than restarted) reload the song list from the
-// database and pick up art/metadata this check() pass just wrote straight
-// to disk/DB.
+// database and pick up art this check() pass just wrote to disk.
 func (w *RB3ECDBCheckWatcher) refreshHub() {
 	w.Hub.Mutate(func(s *GameState) {
 		s.SongListVersion++
@@ -200,21 +172,6 @@ func (w *RB3ECDBCheckWatcher) refreshHub() {
 func hasLocalArt(artDir, shortname string) bool {
 	info, err := os.Stat(filepath.Join(artDir, shortname+"_keep.png"))
 	return err == nil && !info.IsDir()
-}
-
-// hasLocalMetadata reports whether a <shortname>.yml metadata file already
-// exists in any of metadataDirs.
-func hasLocalMetadata(shortname string, metadataDirs []string) bool {
-	for _, dir := range metadataDirs {
-		if dir == "" {
-			continue
-		}
-		info, err := os.Stat(filepath.Join(dir, shortname+".yml"))
-		if err == nil && !info.IsDir() {
-			return true
-		}
-	}
-	return false
 }
 
 // downloadArt checks the RB3EC-db repository for shortname's art and, if
@@ -258,43 +215,6 @@ func downloadArt(ctx context.Context, artDir, shortname, origin string) (downloa
 		return false, err
 	}
 	if err := os.Rename(tmp, dest); err != nil {
-		return false, err
-	}
-	return true, nil
-}
-
-// importRemoteMetadata checks the RB3EC-db repository for shortname's
-// metadata and, if present, imports it directly into the song's row (see
-// db.ImportMetadata) - it's never written to disk. A 404 (no metadata for
-// this song) is not an error and reports imported false - err is only set
-// for a failed check.
-func importRemoteMetadata(ctx context.Context, sqlDB *sql.DB, shortname, origin string) (imported bool, err error) {
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-
-	target := fmt.Sprintf(metadataURLTemplate, url.PathEscape(origin), url.PathEscape(shortname))
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
-	if err != nil {
-		return false, err
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return false, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode == http.StatusNotFound {
-		return false, nil
-	}
-	if resp.StatusCode != http.StatusOK {
-		return false, fmt.Errorf("unexpected status %s", resp.Status)
-	}
-
-	data, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return false, err
-	}
-	if err := db.ImportMetadata(sqlDB, shortname, data); err != nil {
 		return false, err
 	}
 	return true, nil

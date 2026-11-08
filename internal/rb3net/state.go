@@ -5,7 +5,6 @@ package rb3net
 
 import (
 	"sync"
-	"time"
 )
 
 // BandMember is one of the up to 4 instrument/vocal slots reported by a
@@ -40,9 +39,10 @@ func (sk *StageKit) applyColour(colourIdx int, ledMask byte) {
 
 // Song is one entry from RB3Enhanced's console-side /list_songs response.
 // The DifficultyX fields are chart difficulty ratings from 0-7, where 0
-// means the song has no chart for that part - including every field here
-// until db.SaveSongs fills them in from a metadata file, since the
-// console's own song list doesn't report them.
+// means the song has no chart for that part. Newer RB3Enhanced builds
+// report genre/year/length and per-part ranks (converted to these tiers by
+// parseSongListINI). VocalParts is only reported when the console has the
+// song's info loaded; without it, db.SaveSongs keeps the stored value.
 type Song struct {
 	Shortname string
 	Title     string
@@ -58,7 +58,6 @@ type Song struct {
 	DifficultyVocals    int
 	DifficultyProGuitar int
 	DifficultyProBass   int
-	DifficultyProDrum   int
 	DifficultyProKeys   int
 
 	// Genre, VocalParts, Year and Length are nullable - nil when unknown.
@@ -66,10 +65,6 @@ type Song struct {
 	VocalParts *int // 0-3
 	Year       *int
 	Length     *int // milliseconds
-
-	// MetadataDatetime is the modification time of the metadata JSON file
-	// db.SaveSongs found for this song (nil if none was found).
-	MetadataDatetime *time.Time
 }
 
 // GameState is the latest known state of the game, assembled from whichever

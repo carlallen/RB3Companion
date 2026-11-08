@@ -72,3 +72,132 @@ func TestSaveSongsEmptyIsNoopOnEmptyTable(t *testing.T) {
 		t.Fatalf("after empty save on empty table: loaded=%+v err=%v", loaded, err)
 	}
 }
+
+func TestSaveSongsKeepsStoredMetadataWithoutConsoleMetadata(t *testing.T) {
+	sqlDB, err := Open(t.TempDir() + "/test.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sqlDB.Close()
+
+	genre := "Metal"
+	year := 1990
+	if err := SaveSongs(sqlDB, []SongRecord{
+		{Shortname: "song", Title: "S", Origin: "rb3", DifficultyBand: 5, Genre: &genre, Year: &year},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sqlDB.Exec(`UPDATE songs SET vocal_parts = 2 WHERE shortname = 'song'`); err != nil {
+		t.Fatal(err)
+	}
+
+	// A save from an older RB3Enhanced build (no metadata in the song list)
+	// keeps everything stored.
+	if err := SaveSongs(sqlDB, []SongRecord{{Shortname: "song", Title: "S", Origin: "rb3"}}); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := LoadSongs(sqlDB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded) != 1 || loaded[0].DifficultyBand != 5 || loaded[0].Genre == nil || *loaded[0].Genre != "Metal" ||
+		loaded[0].VocalParts == nil || *loaded[0].VocalParts != 2 {
+		t.Fatalf("stored metadata should be kept, got %+v", loaded)
+	}
+
+	// New console metadata replaces it, but vocal parts is kept when the
+	// console didn't report it.
+	newGenre := "Rock"
+	if err := SaveSongs(sqlDB, []SongRecord{
+		{Shortname: "song", Title: "S", Origin: "rb3", DifficultyBand: 3, Genre: &newGenre},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err = LoadSongs(sqlDB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := loaded[0]
+	if s.DifficultyBand != 3 || s.Genre == nil || *s.Genre != "Rock" || s.Year != nil ||
+		s.VocalParts == nil || *s.VocalParts != 2 {
+		t.Fatalf("console metadata should replace stored values except vocal parts, got %+v", s)
+	}
+
+	// Console-reported vocal parts replaces the stored value.
+	one := 1
+	if err := SaveSongs(sqlDB, []SongRecord{
+		{Shortname: "song", Title: "S", Origin: "rb3", DifficultyBand: 3, VocalParts: &one},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err = LoadSongs(sqlDB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v := loaded[0].VocalParts; v == nil || *v != 1 {
+		t.Fatalf("console vocal parts should be stored, got %v", v)
+	}
+}
+
+func TestOpenDropsMetadataDatetimeColumn(t *testing.T) {
+	path := t.TempDir() + "/test.sql"
+	sqlDB, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sqlDB.Exec(`ALTER TABLE songs ADD COLUMN metadata_datetime DATETIME`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sqlDB.Exec(`INSERT INTO songs (shortname, title, artist, album, origin, metadata_datetime) VALUES ('s', 'S', 'A', 'B', 'rb3', CURRENT_TIMESTAMP)`); err != nil {
+		t.Fatal(err)
+	}
+	sqlDB.Close()
+
+	sqlDB, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sqlDB.Close()
+	columns, err := songsColumnInfo(sqlDB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := columns["metadata_datetime"]; ok {
+		t.Fatal("metadata_datetime column should have been dropped")
+	}
+	if loaded, err := LoadSongs(sqlDB); err != nil || len(loaded) != 1 {
+		t.Fatalf("existing row should survive the migration: loaded=%+v err=%v", loaded, err)
+	}
+}
+
+func TestOpenDropsDifficultyProDrumColumn(t *testing.T) {
+	path := t.TempDir() + "/test.sql"
+	sqlDB, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sqlDB.Exec(`ALTER TABLE songs ADD COLUMN difficulty_pro_drum INTEGER NOT NULL DEFAULT 0`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sqlDB.Exec(`INSERT INTO songs (shortname, title, artist, album, origin, difficulty_drum, difficulty_pro_drum) VALUES ('s', 'S', 'A', 'B', 'rb3', 4, 4)`); err != nil {
+		t.Fatal(err)
+	}
+	sqlDB.Close()
+
+	sqlDB, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sqlDB.Close()
+	columns, err := songsColumnInfo(sqlDB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := columns["difficulty_pro_drum"]; ok {
+		t.Fatal("difficulty_pro_drum column should have been dropped")
+	}
+	loaded, err := LoadSongs(sqlDB)
+	if err != nil || len(loaded) != 1 || loaded[0].DifficultyDrum != 4 {
+		t.Fatalf("existing row should survive the migration: loaded=%+v err=%v", loaded, err)
+	}
+}
