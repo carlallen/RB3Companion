@@ -9,18 +9,10 @@ import (
 	"strings"
 
 	"github.com/carlallen/RB3EnhancedCompanion/internal/db"
-	"github.com/carlallen/RB3EnhancedCompanion/internal/rb3net"
 )
 
 // configPageData is the data made available to config.html.
 type configPageData struct {
-	// ConsoleIP is the user-configured console address, "" for
-	// auto-detect. DetectedConsoleIP is the address RB3Enhanced's packets
-	// were last received from, "" if none have arrived yet.
-	ConsoleIP         string
-	DetectedConsoleIP string
-	ConsoleIPError    string
-
 	WLEDDevices []wledDeviceView
 	// WLEDError, when set, is shown as a banner explaining why the most
 	// recent LED mapping save was rejected. WLEDErrorDeviceID names the
@@ -152,13 +144,9 @@ func parseLEDList(s string) ([]int, error) {
 	return leds, nil
 }
 
-// buildConfigPageData loads the console address and current WLED devices
-// for rendering config.html.
-func buildConfigPageData(hub *rb3net.Hub, sqlDB *sql.DB) (configPageData, error) {
-	consoleIP, err := db.GetConsoleIP(sqlDB)
-	if err != nil {
-		return configPageData{}, err
-	}
+// buildConfigPageData loads the current WLED devices for rendering
+// config.html.
+func buildConfigPageData(sqlDB *sql.DB) (configPageData, error) {
 	devices, err := db.ListWLEDDevices(sqlDB)
 	if err != nil {
 		return configPageData{}, err
@@ -167,60 +155,7 @@ func buildConfigPageData(hub *rb3net.Hub, sqlDB *sql.DB) (configPageData, error)
 	for i, d := range devices {
 		views[i] = toWLEDDeviceView(d)
 	}
-	return configPageData{
-		ConsoleIP:         consoleIP,
-		DetectedConsoleIP: hub.State().SourceIP,
-		WLEDDevices:       views,
-	}, nil
-}
-
-// validConsoleAddress reports whether s is usable as the host part of the
-// console's http://HOST:PORT URL: an IPv4 address or hostname, so only
-// letters, digits, dots, and hyphens.
-func validConsoleAddress(s string) bool {
-	if s == "" || len(s) > 253 {
-		return false
-	}
-	for _, r := range s {
-		switch {
-		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '.', r == '-':
-		default:
-			return false
-		}
-	}
-	return true
-}
-
-// handleConsoleIP saves the console address from the "console-ip" form
-// field; an empty value clears it, going back to auto-detection. An
-// invalid address re-renders the config page with an error, nothing saved.
-func handleConsoleIP(tmpl *template.Template, hub *rb3net.Hub, sqlDB *sql.DB) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if err := r.ParseForm(); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		ip := strings.TrimSpace(r.FormValue("console-ip"))
-		if ip != "" && !validConsoleAddress(ip) {
-			data, err := buildConfigPageData(hub, sqlDB)
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-			data.ConsoleIP = ip
-			data.ConsoleIPError = fmt.Sprintf("%q is not a valid IP address or hostname - nothing was saved.", ip)
-			w.WriteHeader(http.StatusUnprocessableEntity)
-			if err := tmpl.Execute(w, data); err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-			}
-			return
-		}
-		if err := db.SetConsoleIP(sqlDB, ip); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		http.Redirect(w, r, "/config", http.StatusSeeOther)
-	}
+	return configPageData{WLEDDevices: views}, nil
 }
 
 // overrideChannelDisplay rebuilds the channel rows of the device with the
@@ -238,9 +173,9 @@ func overrideChannelDisplay(views []wledDeviceView, id int64, submitted []string
 
 // handleConfig renders the config page, including the currently configured
 // WLED devices.
-func handleConfig(tmpl *template.Template, hub *rb3net.Hub, sqlDB *sql.DB) http.HandlerFunc {
+func handleConfig(tmpl *template.Template, sqlDB *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		data, err := buildConfigPageData(hub, sqlDB)
+		data, err := buildConfigPageData(sqlDB)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -347,7 +282,7 @@ func handleWLEDDeviceEnabled(sqlDB *sql.DB) http.HandlerFunc {
 // WARLS's addressable 0-255 range, nothing is saved and the config page is
 // re-rendered with an error explaining which field(s) to fix, the rest of
 // the form left exactly as submitted.
-func handleWLEDDeviceChannels(tmpl *template.Template, hub *rb3net.Hub, sqlDB *sql.DB) http.HandlerFunc {
+func handleWLEDDeviceChannels(tmpl *template.Template, sqlDB *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if err := r.ParseForm(); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
@@ -374,7 +309,7 @@ func handleWLEDDeviceChannels(tmpl *template.Template, hub *rb3net.Hub, sqlDB *s
 		}
 
 		if len(badFields) > 0 {
-			data, err := buildConfigPageData(hub, sqlDB)
+			data, err := buildConfigPageData(sqlDB)
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return

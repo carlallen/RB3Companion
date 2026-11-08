@@ -30,23 +30,6 @@
 
   <div class="card">
     <div class="setting-row">
-      <div class="setting-label">Console</div>
-      <p class="setting-help">IP address of the Xbox 360 / PS3 running RB3Enhanced, used to fetch the song list and jump to songs. Leave blank to use the address its network packets arrive from.</p>
-
-      {{if .ConsoleIPError}}
-      <p class="setting-help wled-error">{{.ConsoleIPError}}</p>
-      {{end}}
-
-      <form method="post" action="/config/console-ip" class="add-device-form">
-        <input type="text" name="console-ip" value="{{.ConsoleIP}}" placeholder="{{if .DetectedConsoleIP}}Auto-detect ({{.DetectedConsoleIP}}){{else}}Auto-detect{{end}}" aria-label="Console IP address" autocomplete="off">
-        <button class="button" type="submit">Save</button>
-      </form>
-      <p class="setting-help">{{if .DetectedConsoleIP}}Detected from RB3Enhanced: {{.DetectedConsoleIP}}{{else}}No packets received from RB3Enhanced yet.{{end}}</p>
-    </div>
-  </div>
-
-  <div class="card">
-    <div class="setting-row">
       <div class="setting-label">WLED Devices</div>
       <p class="setting-help">Add WLED controllers and choose which of their LEDs light up for each stage kit light.</p>
 

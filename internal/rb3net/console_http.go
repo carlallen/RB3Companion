@@ -246,21 +246,6 @@ func Jump(ctx context.Context, ip, shortname string) error {
 	return nil
 }
 
-// ConsoleAddress returns the address to reach the console's HTTP server at:
-// the one configured on the settings page if set, otherwise the address
-// RB3Enhanced's UDP packets were last received from. "" means neither is
-// known yet.
-func ConsoleAddress(sqlDB *sql.DB, state GameState) string {
-	ip, err := db.GetConsoleIP(sqlDB)
-	if err != nil {
-		log.Printf("rb3net: failed to read configured console ip: %v", err)
-	}
-	if ip != "" {
-		return ip
-	}
-	return state.SourceIP
-}
-
 // SongListWatcher fetches the song list from the console's HTTP server the
 // first time RB3Enhanced reports the song select screen after each
 // successful connection and persists it to DB, bumping the Hub's
@@ -295,7 +280,7 @@ func (w *SongListWatcher) Run(ctx context.Context) {
 			if fetchedThisConnection || state.ScreenName != songListScreen {
 				continue
 			}
-			ip := ConsoleAddress(w.DB, state)
+			ip := state.SourceIP
 			if ip == "" {
 				continue
 			}

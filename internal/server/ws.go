@@ -249,7 +249,7 @@ func writeState(ctx context.Context, conn *websocket.Conn, d dashboardState) err
 
 // handleJump proxies to the console's /jump endpoint, which switches the
 // Music Library's selection to the given song.
-func handleJump(hub *rb3net.Hub, sqlDB *sql.DB) http.HandlerFunc {
+func handleJump(hub *rb3net.Hub) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		shortname := r.URL.Query().Get("shortname")
 		if shortname == "" {
@@ -257,9 +257,9 @@ func handleJump(hub *rb3net.Hub, sqlDB *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		ip := rb3net.ConsoleAddress(sqlDB, hub.State())
+		ip := hub.State().SourceIP
 		if ip == "" {
-			http.Error(w, "console address unknown - set it on the settings page or wait for RB3Enhanced", http.StatusServiceUnavailable)
+			http.Error(w, "console address unknown - waiting for RB3Enhanced", http.StatusServiceUnavailable)
 			return
 		}
 
