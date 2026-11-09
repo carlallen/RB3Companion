@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/carlallen/RB3EnhancedCompanion/internal/db"
+	"github.com/carlallen/RB3Companion/internal/db"
 )
 
 // wledPort is the UDP port WLED listens for realtime pixel data on.

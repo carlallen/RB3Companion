@@ -13,8 +13,8 @@ import (
 
 	"nhooyr.io/websocket"
 
-	"github.com/carlallen/RB3EnhancedCompanion/internal/db"
-	"github.com/carlallen/RB3EnhancedCompanion/internal/rb3net"
+	"github.com/carlallen/RB3Companion/internal/db"
+	"github.com/carlallen/RB3Companion/internal/rb3net"
 )
 
 // dashboardState is the JSON shape pushed to the browser over /ws: the

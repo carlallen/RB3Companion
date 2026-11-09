@@ -12,13 +12,13 @@ RUN go mod download
 COPY . .
 
 # go-sqlite3 uses cgo, so CGO must stay enabled.
-RUN CGO_ENABLED=1 GOOS=linux go build -o /out/rb3ecompanion ./cmd/server
+RUN CGO_ENABLED=1 GOOS=linux go build -o /out/rb3companion ./cmd/server
 
 FROM alpine:3.20
 
 WORKDIR /app
 
-COPY --from=build /out/rb3ecompanion ./rb3ecompanion
+COPY --from=build /out/rb3companion ./rb3companion
 COPY web ./web
 
 RUN mkdir -p /store/art
@@ -32,4 +32,4 @@ VOLUME ["/store"]
 EXPOSE 8080/tcp
 EXPOSE 21070/udp
 
-ENTRYPOINT ["/app/rb3ecompanion"]
+ENTRYPOINT ["/app/rb3companion"]

@@ -1,4 +1,4 @@
-module github.com/carlallen/RB3EnhancedCompanion
+module github.com/carlallen/RB3Companion
 
 go 1.18
 

@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/carlallen/RB3EnhancedCompanion/internal/db"
+	"github.com/carlallen/RB3Companion/internal/db"
 )
 
 // configPageData is the data made available to config.html.

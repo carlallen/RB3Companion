@@ -7,7 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/carlallen/RB3EnhancedCompanion/internal/rb3net"
+	"github.com/carlallen/RB3Companion/internal/rb3net"
 )
 
 func NewRouter(hub *rb3net.Hub, database *sql.DB, staticDir, storeDir, templateDir string) http.Handler {

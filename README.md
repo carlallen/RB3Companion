@@ -1,4 +1,4 @@
-# RB3Enhanced Companion
+# RB3Companion
 
 A self-hosted companion web app for [Rock Band 3 Deluxe](https://github.com/hmxmilohax/rock-band-3-deluxe) running [RB3Enhanced](https://github.com/RBEnhanced/RB3Enhanced). It listens for RB3Enhanced's network broadcast and turns it into:
 
@@ -19,15 +19,15 @@ If WLED devices are configured, incoming Stage Kit commands are translated into 
 
 ### Docker (recommended)
 
-Prebuilt images are published to GHCR on every push to `main`: `ghcr.io/carlallen/rb3enhancedcompanion`.
+Prebuilt images are published to GHCR on every push to `main`: `ghcr.io/carlallen/rb3companion`.
 
 ```sh
 docker run -d \
-  --name rb3ecompanion \
+  --name rb3companion \
   -p 8080:8080 \
   -p 21070:21070/udp \
-  -v rb3ecompanion-store:/store \
-  ghcr.io/carlallen/rb3enhancedcompanion:main
+  -v rb3companion-store:/store \
+  ghcr.io/carlallen/rb3companion:main
 ```
 
 - Port `8080/tcp` serves the web dashboard and settings page.
@@ -37,7 +37,7 @@ docker run -d \
 Or build the image yourself with the included `Dockerfile`:
 
 ```sh
-docker build -t rb3ecompanion .
+docker build -t rb3companion .
 ```
 
 ### From source
@@ -45,8 +45,8 @@ docker build -t rb3ecompanion .
 Requires Go 1.18+. `go-sqlite3` uses cgo, so a C toolchain (gcc) must be available and `CGO_ENABLED=1`.
 
 ```sh
-go build -o rb3ecompanion ./cmd/server
-./rb3ecompanion
+go build -o rb3companion ./cmd/server
+./rb3companion
 ```
 
 By default this serves on `:8080`, listens for RB3Enhanced on UDP `:21070`, and stores data under `./store`.
@@ -60,7 +60,7 @@ The server is configured entirely through environment variables:
 | `ADDR`      | `:8080`                      | Address the HTTP server listens on                |
 | `UDP_ADDR`  | `:21070`                     | Address the RB3Enhanced UDP listener binds to     |
 | `STORE_DIR` | `store`                      | Directory for the database and custom album art   |
-| `DB_PATH`   | `<STORE_DIR>/rb3ecompanion.db` | Path to the SQLite database file                |
+| `DB_PATH`   | `<STORE_DIR>/rb3companion.db` | Path to the SQLite database file                |
 
 WLED devices, and each one's Stage Kit channel → LED mapping, are managed at runtime from the `/config` page — no restart required.
 

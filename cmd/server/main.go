@@ -10,10 +10,28 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/carlallen/RB3EnhancedCompanion/internal/db"
-	"github.com/carlallen/RB3EnhancedCompanion/internal/rb3net"
-	"github.com/carlallen/RB3EnhancedCompanion/internal/server"
+	"github.com/carlallen/RB3Companion/internal/db"
+	"github.com/carlallen/RB3Companion/internal/rb3net"
+	"github.com/carlallen/RB3Companion/internal/server"
 )
+
+// migrateLegacyDB moves a database created under the project's previous name
+// to newPath, so upgrading doesn't start with an empty database. The main file
+// moves last: if a move fails partway, the next startup retries it.
+func migrateLegacyDB(oldPath, newPath string) {
+	if _, err := os.Stat(newPath); !os.IsNotExist(err) {
+		return
+	}
+	if _, err := os.Stat(oldPath); err != nil {
+		return
+	}
+	for _, suffix := range []string{"-wal", "-shm", ""} {
+		if err := os.Rename(oldPath+suffix, newPath+suffix); err != nil && !os.IsNotExist(err) {
+			log.Fatalf("db: failed to move %s to %s: %v", oldPath+suffix, newPath+suffix, err)
+		}
+	}
+	log.Printf("db: moved %s to %s", oldPath, newPath)
+}
 
 func main() {
 	addr := os.Getenv("ADDR")
@@ -36,7 +54,8 @@ func main() {
 
 	dbPath := os.Getenv("DB_PATH")
 	if dbPath == "" {
-		dbPath = filepath.Join(storeDir, "rb3ecompanion.db")
+		dbPath = filepath.Join(storeDir, "rb3companion.db")
+		migrateLegacyDB(filepath.Join(storeDir, "rb3ecompanion.db"), dbPath)
 	}
 
 	database, err := db.Open(dbPath)

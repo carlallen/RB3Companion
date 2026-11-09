@@ -1,7 +1,7 @@
 (function () {
 	'use strict';
 
-	var STORAGE_KEY = 'rb3ec-theme';
+	var STORAGE_KEY = 'rb3companion-theme';
 	var buttons = document.querySelectorAll('#theme-options .theme-option');
 
 	function currentTheme() {

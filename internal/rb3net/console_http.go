@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/carlallen/RB3EnhancedCompanion/internal/db"
+	"github.com/carlallen/RB3Companion/internal/db"
 )
 
 // consoleHTTPPort is the TCP port RB3Enhanced's in-game HTTP server listens

@@ -3,7 +3,7 @@
 (function () {
 	'use strict';
 	try {
-		var theme = localStorage.getItem('rb3ec-theme');
+		var theme = localStorage.getItem('rb3companion-theme');
 		if (theme === 'light' || theme === 'dark') {
 			document.documentElement.setAttribute('data-theme', theme);
 		}

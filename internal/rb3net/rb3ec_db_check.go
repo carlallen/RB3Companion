@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/carlallen/RB3EnhancedCompanion/internal/db"
+	"github.com/carlallen/RB3Companion/internal/db"
 )
 
 // artURLTemplate is the RB3EC-db repository's raw-content URL for a song's
