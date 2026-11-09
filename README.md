@@ -66,7 +66,9 @@ WLED devices, and each one's Stage Kit channel → LED mapping, are managed at r
 
 ### Album art
 
-Album art for Rock Band 1, Rock Band 3, and Rock Band 3 Deluxe ships pre-packaged in `web/static/art`. For anything else (DLC, customs), drop a PNG named after the song's shortname (e.g. `store/art/<shortname>.png`) to override/add its artwork. Custom art in `store/art` takes priority over the bundled artwork, which falls back to a blank placeholder if nothing matches.
+When the song list loads, the app tries to download art for each new song from the [RB3art](https://github.com/carlallen/RB3art) album art database and saves it to `store/art`. Each song is only looked up once, and any failed downloads are retried the next time the song list loads.
+
+To add other art (DLC, customs), drop a PNG named after the song's shortname in `store/art`, e.g. `store/art/<shortname>_keep.png`. Art already in `store/art` is never replaced by a download, and songs with no art show a blank placeholder.
 
 ## Development
 
