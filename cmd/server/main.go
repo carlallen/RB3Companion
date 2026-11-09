@@ -96,7 +96,7 @@ func main() {
 	wled := &rb3net.WLEDWatcher{Hub: hub, DB: database}
 	go wled.Run(ctx)
 
-	dbCheck := &rb3net.RB3ECDBCheckWatcher{Hub: hub, DB: database, StoreDir: storeDir}
+	dbCheck := &rb3net.RB3ArtCheckWatcher{Hub: hub, DB: database, StoreDir: storeDir}
 	go dbCheck.Run(ctx)
 
 	srv := &http.Server{

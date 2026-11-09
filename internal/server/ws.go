@@ -92,7 +92,7 @@ type songDTO struct {
 }
 
 // hasArtFile reports whether custom album art has been downloaded for
-// shortname into artDir (see RB3ECDBCheckWatcher). Checked directly against
+// shortname into artDir (see RB3ArtCheckWatcher). Checked directly against
 // disk on every song list push rather than cached, since that's cheap
 // enough and keeps this the single source of truth for HasArt.
 func hasArtFile(artDir, shortname string) bool {

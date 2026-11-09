@@ -16,20 +16,20 @@ import (
 	"github.com/carlallen/RB3Companion/internal/db"
 )
 
-// artURLTemplate is the RB3EC-db repository's raw-content URL for a song's
+// artURLTemplate is the RB3art repository's raw-content URL for a song's
 // bundled album art, keyed by origin and shortname.
-const artURLTemplate = "https://github.com/carlallen/RB3EC-db/blob/main/art/%s/%s_keep.png?raw=true"
+const artURLTemplate = "https://github.com/carlallen/RB3art/blob/main/art/%s/%s_keep.png?raw=true"
 
-// RB3ECDBCheckWatcher checks every song not yet checked
-// (db.PendingRB3ECDBCheckSongs) against the RB3EC-db repository each time the
+// RB3ArtCheckWatcher checks every song not yet checked
+// (db.PendingRB3ArtCheckSongs) against the RB3art repository each time the
 // song list is (re)loaded - both the initial load from the database at
 // startup and every subsequent console fetch bump SongList and so wake this
 // watcher, since it just watches for SongList changes on the Hub rather than
 // being wired into either load path directly. For each such song, if it has
-// no art locally yet, art is fetched from RB3EC-db and, if present,
+// no art locally yet, art is fetched from RB3art and, if present,
 // downloaded into storeDir/art. The song is then marked checked so it isn't
 // retried.
-type RB3ECDBCheckWatcher struct {
+type RB3ArtCheckWatcher struct {
 	Hub      *Hub
 	DB       *sql.DB
 	StoreDir string
@@ -37,14 +37,14 @@ type RB3ECDBCheckWatcher struct {
 	// mu guards running and rerun, which together coalesce version bumps
 	// that arrive while a check() pass is still in flight (see trigger) so
 	// two passes never run concurrently - both would pull overlapping
-	// PendingRB3ECDBCheckSongs results and race on downloadArt's shared tmp
+	// PendingRB3ArtCheckSongs results and race on downloadArt's shared tmp
 	// file for any song they have in common.
 	mu      sync.Mutex
 	running bool
 	rerun   bool
 }
 
-func (w *RB3ECDBCheckWatcher) Run(ctx context.Context) {
+func (w *RB3ArtCheckWatcher) Run(ctx context.Context) {
 	ch := w.Hub.Subscribe()
 	defer w.Hub.Unsubscribe(ch)
 
@@ -77,7 +77,7 @@ func (w *RB3ECDBCheckWatcher) Run(ctx context.Context) {
 // trigger starts a check() pass, unless one is already running - in which
 // case it flags that pass to run again once it finishes, rather than
 // starting a second pass concurrently.
-func (w *RB3ECDBCheckWatcher) trigger(ctx context.Context) {
+func (w *RB3ArtCheckWatcher) trigger(ctx context.Context) {
 	w.mu.Lock()
 	if w.running {
 		w.rerun = true
@@ -104,10 +104,10 @@ func (w *RB3ECDBCheckWatcher) trigger(ctx context.Context) {
 	}()
 }
 
-func (w *RB3ECDBCheckWatcher) check(ctx context.Context) {
-	pending, err := db.PendingRB3ECDBCheckSongs(w.DB)
+func (w *RB3ArtCheckWatcher) check(ctx context.Context) {
+	pending, err := db.PendingRB3ArtCheckSongs(w.DB)
 	if err != nil {
-		log.Printf("rb3net: RB3EC db check: failed to load pending songs: %v", err)
+		log.Printf("rb3net: RB3art check: failed to load pending songs: %v", err)
 		return
 	}
 	if len(pending) == 0 {
@@ -116,7 +116,7 @@ func (w *RB3ECDBCheckWatcher) check(ctx context.Context) {
 
 	artDir := filepath.Join(w.StoreDir, "art")
 	if err := os.MkdirAll(artDir, 0o755); err != nil {
-		log.Printf("rb3net: RB3EC db check: failed to create %s: %v", artDir, err)
+		log.Printf("rb3net: RB3art check: failed to create %s: %v", artDir, err)
 		return
 	}
 
@@ -135,7 +135,7 @@ func (w *RB3ECDBCheckWatcher) check(ctx context.Context) {
 		}
 
 		// A transient failure fetching art (network, disk, unexpected
-		// status) leaves RB3EC_db_check false so this song is retried on the
+		// status) leaves RB3art_check false so this song is retried on the
 		// next check rather than being skipped forever.
 		if !hasLocalArt(artDir, s.Shortname) {
 			downloaded, err := downloadArt(ctx, artDir, s.Shortname, s.Origin)
@@ -148,8 +148,8 @@ func (w *RB3ECDBCheckWatcher) check(ctx context.Context) {
 			}
 		}
 
-		if err := db.MarkRB3ECDBChecked(w.DB, s.Shortname); err != nil {
-			log.Printf("rb3net: RB3EC db check: failed to mark %s checked: %v", s.Shortname, err)
+		if err := db.MarkRB3ArtChecked(w.DB, s.Shortname); err != nil {
+			log.Printf("rb3net: RB3art check: failed to mark %s checked: %v", s.Shortname, err)
 		}
 	}
 
@@ -161,7 +161,7 @@ func (w *RB3ECDBCheckWatcher) check(ctx context.Context) {
 // refreshHub bumps SongListVersion so clients connected to a server that's
 // been running (rather than restarted) reload the song list from the
 // database and pick up art this check() pass just wrote to disk.
-func (w *RB3ECDBCheckWatcher) refreshHub() {
+func (w *RB3ArtCheckWatcher) refreshHub() {
 	w.Hub.Mutate(func(s *GameState) {
 		s.SongListVersion++
 	})
@@ -174,7 +174,7 @@ func hasLocalArt(artDir, shortname string) bool {
 	return err == nil && !info.IsDir()
 }
 
-// downloadArt checks the RB3EC-db repository for shortname's art and, if
+// downloadArt checks the RB3art repository for shortname's art and, if
 // present, downloads it into artDir. A 404 (no art for this song) is not an
 // error and reports downloaded false - err is only set for a failed check.
 func downloadArt(ctx context.Context, artDir, shortname, origin string) (downloaded bool, err error) {

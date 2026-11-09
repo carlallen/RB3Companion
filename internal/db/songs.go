@@ -58,7 +58,7 @@ const songsTableColumns = `
 	vocal_parts             INTEGER,
 	year                    INTEGER,
 	length                  INTEGER,
-	RB3EC_db_check          INTEGER NOT NULL DEFAULT 0
+	RB3art_check          INTEGER NOT NULL DEFAULT 0
 `
 
 var createSongsTable = "CREATE TABLE IF NOT EXISTS songs (" + songsTableColumns + ")"
@@ -89,7 +89,7 @@ var songMigrationColumns = []string{
 	"vocal_parts INTEGER",
 	"year INTEGER",
 	"length INTEGER",
-	"RB3EC_db_check INTEGER NOT NULL DEFAULT 0",
+	"RB3art_check INTEGER NOT NULL DEFAULT 0",
 }
 
 // obsoleteSongColumns are songs columns earlier versions of this schema had
@@ -100,8 +100,8 @@ var songMigrationColumns = []string{
 var obsoleteSongColumns = []string{"metadata_datetime", "difficulty_pro_drum"}
 
 // migrateSongsTable brings an already-existing songs table up to
-// songsTableColumns: it renames the old db_art_check column if present, drops
-// any obsoleteSongColumns still present, adds any songMigrationColumns that are missing
+// songsTableColumns: it renames the old db_art_check or RB3EC_db_check column
+// if present, drops any obsoleteSongColumns still present, adds any songMigrationColumns that are missing
 // entirely, then, if needed,
 // rebuilds the table to restore the NOT NULL DEFAULT 0 constraint an earlier
 // version of this schema dropped from the difficulty columns, coalescing any
@@ -112,14 +112,17 @@ func migrateSongsTable(sqlDB *sql.DB) error {
 		return err
 	}
 
-	if _, hasOld := columns["db_art_check"]; hasOld {
-		if _, hasNew := columns["RB3EC_db_check"]; !hasNew {
-			if _, err := sqlDB.Exec(`ALTER TABLE songs RENAME COLUMN db_art_check TO RB3EC_db_check`); err != nil {
+	for _, oldName := range []string{"db_art_check", "RB3EC_db_check"} {
+		if _, hasOld := columns[oldName]; !hasOld {
+			continue
+		}
+		if _, hasNew := columns["RB3art_check"]; !hasNew {
+			if _, err := sqlDB.Exec(fmt.Sprintf(`ALTER TABLE songs RENAME COLUMN %s TO RB3art_check`, oldName)); err != nil {
 				return err
 			}
-			columns["RB3EC_db_check"] = columns["db_art_check"]
+			columns["RB3art_check"] = columns[oldName]
 		}
-		delete(columns, "db_art_check")
+		delete(columns, oldName)
 	}
 
 	for _, name := range obsoleteSongColumns {
@@ -206,7 +209,7 @@ func rebuildSongsTableDifficultyNotNull(sqlDB *sql.DB) error {
 			COALESCE(difficulty_band, 0), COALESCE(difficulty_guitar, 0), COALESCE(difficulty_bass, 0),
 			COALESCE(difficulty_drum, 0), COALESCE(difficulty_keys, 0), COALESCE(difficulty_vocals, 0),
 			COALESCE(difficulty_pro_guitar, 0), COALESCE(difficulty_pro_bass, 0), COALESCE(difficulty_pro_keys, 0),
-			genre, vocal_parts, year, length, RB3EC_db_check
+			genre, vocal_parts, year, length, RB3art_check
 		FROM songs`); err != nil {
 		return err
 	}
@@ -435,25 +438,25 @@ func SaveSongs(sqlDB *sql.DB, songs []SongRecord) error {
 	return tx.Commit()
 }
 
-// RB3ECDBCheckSong is a song not yet checked against the RB3EC-db repository
-// - see PendingRB3ECDBCheckSongs.
-type RB3ECDBCheckSong struct {
+// RB3ArtCheckSong is a song not yet checked against the RB3art repository
+// - see PendingRB3ArtCheckSongs.
+type RB3ArtCheckSong struct {
 	Shortname string
 	Origin    string
 }
 
-// PendingRB3ECDBCheckSongs returns the shortname and origin of every song
-// whose RB3EC_db_check flag is still false, i.e. hasn't been checked yet.
-func PendingRB3ECDBCheckSongs(sqlDB *sql.DB) ([]RB3ECDBCheckSong, error) {
-	rows, err := sqlDB.Query(`SELECT shortname, origin FROM songs WHERE RB3EC_db_check = 0`)
+// PendingRB3ArtCheckSongs returns the shortname and origin of every song
+// whose RB3art_check flag is still false, i.e. hasn't been checked yet.
+func PendingRB3ArtCheckSongs(sqlDB *sql.DB) ([]RB3ArtCheckSong, error) {
+	rows, err := sqlDB.Query(`SELECT shortname, origin FROM songs WHERE RB3art_check = 0`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var pending []RB3ECDBCheckSong
+	var pending []RB3ArtCheckSong
 	for rows.Next() {
-		var s RB3ECDBCheckSong
+		var s RB3ArtCheckSong
 		if err := rows.Scan(&s.Shortname, &s.Origin); err != nil {
 			return nil, err
 		}
@@ -462,10 +465,10 @@ func PendingRB3ECDBCheckSongs(sqlDB *sql.DB) ([]RB3ECDBCheckSong, error) {
 	return pending, rows.Err()
 }
 
-// MarkRB3ECDBChecked sets shortname's RB3EC_db_check flag so
-// PendingRB3ECDBCheckSongs won't return it again.
-func MarkRB3ECDBChecked(sqlDB *sql.DB, shortname string) error {
-	_, err := sqlDB.Exec(`UPDATE songs SET RB3EC_db_check = 1 WHERE shortname = ?`, shortname)
+// MarkRB3ArtChecked sets shortname's RB3art_check flag so
+// PendingRB3ArtCheckSongs won't return it again.
+func MarkRB3ArtChecked(sqlDB *sql.DB, shortname string) error {
+	_, err := sqlDB.Exec(`UPDATE songs SET RB3art_check = 1 WHERE shortname = ?`, shortname)
 	return err
 }
 

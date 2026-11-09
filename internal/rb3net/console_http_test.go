@@ -58,7 +58,7 @@ func TestParseSongListINIMetadata(t *testing.T) {
 		t.Errorf("vocal parts = %v, want 2", s.VocalParts)
 	}
 
-	// Expected tiers match RB3EC-db's metadata/rb1/highwaystar.yml.
+	// Expected tiers match RB3art's metadata/rb1/highwaystar.yml.
 	want := map[string][2]int{
 		"band":       {s.DifficultyBand, 7},
 		"guitar":     {s.DifficultyGuitar, 6},

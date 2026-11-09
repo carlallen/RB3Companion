@@ -127,7 +127,7 @@ func parseSongListINI(r io.Reader) []Song {
 // rankTierThresholds are, per RB3 rank part, the minimum raw rank for tiers
 // 2-7 (any rank above 0 but below the first is tier 1) - the official
 // instrument difficulty tier values, as used by rb_dta_to_rb3ec_db_yml and
-// Nautilus to build RB3EC-db's metadata files.
+// Nautilus to build RB3art's metadata files.
 var rankTierThresholds = map[string][6]int{
 	"band":        {165, 215, 243, 267, 292, 345},
 	"guitar":      {139, 176, 221, 267, 333, 409},
@@ -183,7 +183,7 @@ func applyRank(s *Song, part string, rank int) {
 }
 
 // genreDisplayNames maps RB3 genre symbols to their display names, matching
-// the genre strings in RB3EC-db's metadata files. Unknown symbols are shown
+// the genre strings in RB3art's metadata files. Unknown symbols are shown
 // as-is.
 var genreDisplayNames = map[string]string{
 	"alternative":        "Alternative",

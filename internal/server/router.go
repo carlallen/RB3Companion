@@ -53,7 +53,7 @@ func handleArt(storeArtDir string) http.HandlerFunc {
 		}
 
 		// A shortname's art URL never changes even when the file backing it
-		// does (e.g. rb3net.RB3ECDBCheckWatcher downloading art after the
+		// does (e.g. rb3net.RB3ArtCheckWatcher downloading art after the
 		// fact), so browsers must always revalidate rather than trust a
 		// previously cached copy.
 		w.Header().Set("Cache-Control", "no-cache")
